@@ -20,6 +20,8 @@ import org.spongepowered.api.entity.living.player.Player;
 import org.spongepowered.api.event.Listener;
 import org.spongepowered.api.event.filter.Getter;
 import org.spongepowered.api.event.game.GameReloadEvent;
+import org.spongepowered.api.event.game.state.GameInitializationEvent;
+import org.spongepowered.api.event.game.state.GamePostInitializationEvent;
 import org.spongepowered.api.event.game.state.GameStartedServerEvent;
 import org.spongepowered.api.event.network.ClientConnectionEvent;
 import org.spongepowered.api.plugin.Plugin;
@@ -44,8 +46,9 @@ import java.util.NoSuchElementException;
 public class RestartCountdown {
 
     private ConfigurationLoader<CommentedConfigurationNode> loader;
-    private ConfigurationNode rootNode;
-    private Thread thread;
+    public static ConfigurationNode rootNode;
+    public static  Thread thread;
+    private RestartCountdown instance;
 
     @Inject
     private Logger logger;
@@ -55,11 +58,12 @@ public class RestartCountdown {
     private Path configFile;
 
     @Listener
-    public void onServerStart(GameStartedServerEvent event) {
+    public void onServerStart(GamePostInitializationEvent event) {
         this.logger.info("RestartCountdown is starting!");
+        instance = this;
         RestartCommand cmd = new RestartCommand();
         cmd.register();
-        loadConfig();
+        loadConfig(instance);
     }
 
     @Listener
@@ -69,7 +73,7 @@ public class RestartCountdown {
         if (thread != null) {
             thread = null;
         }
-        loadConfig();
+        loadConfig(instance);
     }
 
     public class RestartCommand {
@@ -80,51 +84,24 @@ public class RestartCountdown {
                     .executor(new CommandExecutor() {
                         @Override
                         public CommandResult execute(CommandSource src, CommandContext args) throws CommandException {
-                            src.sendMessage(Text.of("Starting the countdown!"));
                             if (thread == null) {
+                                src.sendMessage(Text.of("Starting the countdown!"));
                                 startCountdown();
                             } else {
+                                src.sendMessage(Text.of("Stopping the countdown!"));
                                 stopCountdown();
                             }
                             return CommandResult.success();
                         }
                     })
                     .build();
-            Sponge.getCommandManager().register(this, spec, "restartcountdown", "rc");
-        }
-    }
-
-    public class RestartThread extends Thread {
-        @Override
-        public void run() {
-            for (int time = rootNode.getNode("core", "time").getInt(); time >= 0; time--) {
-                if (time == 0) {
-                    try {
-                        List<String> commands = rootNode.getNode("core", "messages", "commands").getList(TypeToken.of(String.class));
-                        commands.forEach(cmd -> Sponge.getCommandManager().process(Sponge.getServer().getConsole(), cmd));
-                        this.interrupt();
-                    } catch (ObjectMappingException e) {}
-                }
-                if (!rootNode.getNode("core", "messages", "override", time).isVirtual()) {
-                    String msg = rootNode.getNode("core", "messages", "override", time).getString();
-                    Sponge.getServer().getOnlinePlayers().forEach(p -> p.sendMessage(TextSerializers.FORMATTING_CODE.deserialize(msg)));
-                    continue;
-                }
-                final int sec = time;
-                try {
-                    if (rootNode.getNode("core", "messages", "warnIn").getList(TypeToken.of(Integer.class)).contains(time)) {
-                        Sponge.getServer().getOnlinePlayers().forEach(p -> p.sendMessage(TextSerializers.FORMATTING_CODE.deserialize(rootNode.getNode("core", "messages", "default").getString().replace("%seconds%", Integer.toString(sec)))));
-                    }
-                } catch (ObjectMappingException e) {}
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {}
-            }
+            Sponge.getCommandManager().register(instance, spec, "restartcountdown", "rc");
         }
     }
 
     public void startCountdown() {
-        this.thread = new RestartThread();
+        thread = new RestartThread();
+        thread.start();
     }
 
     public void stopCountdown() {
@@ -132,10 +109,10 @@ public class RestartCountdown {
         thread = null;
     }
 
-    public void loadConfig() {
+    public void loadConfig(RestartCountdown i) {
         if (!configFile.toFile().exists()) {
             try {
-                Sponge.getAssetManager().getAsset(this, "RestartCountdown.conf").get().copyToFile(configFile);
+                Sponge.getAssetManager().getAsset(i, "RestartCountdown.conf").get().copyToFile(configFile);
             } catch (IOException | NoSuchElementException e) {
                 return;
             }
